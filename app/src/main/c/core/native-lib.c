@@ -21,10 +21,9 @@ static const char* APPNAME = "DetectTamper";
 
 //!!!!!!!!!!!!!!!Replace APK_SIGNER_HASH value with your signing certificate hash!!!!!!!!!!!!!!!!!!!!!
 //!!!! Generate sha256 of CERT.RSA $openssl dgst -sha256 ....app/<release>/META-INF/CERT.RSA
-static const uint8_t APK_SIGNER_HASH[] = {0x01, 0xc8, 0x75, 0xcf, 0xb9, 0x5a, 0x2a, 0x3a,
-                                          0xce, 0x9d, 0x7b, 0xce, 0xf4, 0x86, 0x57, 0xa1,
-                                          0x0e, 0xef, 0x08, 0xd7, 0xaa, 0xcd, 0x76, 0x6b,
-                                          0xd6, 0x62, 0xff, 0x0c, 0xc1, 0x67, 0xf8, 0xa8};
+
+static const uint8_t APK_SIGNER_HASH[] = {0x26,0xe0,0x98,0x63,0xa3,0x1d,0x15,0x96,0x30,0x41,0x8c,0xcf,0xf5,0x69,0x5b,0xb5,0x27,0x63,0x88,0x1e,0xd9,
+                                          0x39,0x77,0x97,0x90,0xcb,0x3c,0x3c,0x8f,0xe0,0xce,0x18};
 
 static const uint8_t text_hash[32] = {0xae, 0x2c, 0xea, 0x2a, 0xbd, 0xa6, 0xf3, 0xec,
                                       0x97, 0x7f, 0x9b, 0xf6, 0x94, 0x9a, 0xfc, 0x83,
@@ -51,6 +50,8 @@ int is_nativelibrary_tampered(){
     const unsigned char *p4 = rodata_end;
     unsigned char signature[DIGEST_SIZE] = "";
 
+    my_memset(signature, 0, DIGEST_SIZE);
+
     __android_log_print(ANDROID_LOG_VERBOSE, APPNAME, "Text Size:%d", p2 - p1 );
     __android_log_print(ANDROID_LOG_VERBOSE, APPNAME, "ROdata Size:%d", p4 - p3);
 
@@ -71,13 +72,25 @@ int is_nativelibrary_tampered(){
         if (0 == my_memcmp(signature, rodata_hash, DIGEST_SIZE)) {
             __android_log_print(ANDROID_LOG_VERBOSE, APPNAME, "ROdata Hash Matches");
             ret = SUCCESS;
+        }else{
+            __android_log_print(ANDROID_LOG_VERBOSE, APPNAME, "ROdata Hash DOESNOT Matches");
+            ret = FAIL;
         }
+    }else{
+        __android_log_print(ANDROID_LOG_VERBOSE, APPNAME, "Text Hash DOESNOT Matches");
+        ret = FAIL;
     }
 
     return ret;
 
 }
-
+void print_bytearray(uint8_t* input, int length){
+    int i;
+    for (i = 0; i < length; i++)
+    {
+        __android_log_print(ANDROID_LOG_VERBOSE, APPNAME,"%02X", input[i]);
+    }
+}
 JNIEXPORT jint
 Java_com_darvin_security_MainActivity_isApkTampered(JNIEnv *env,
                                                       jobject this,
@@ -92,44 +105,56 @@ Java_com_darvin_security_MainActivity_isApkTampered(JNIEnv *env,
     uint8_t* rsacert = 0;
     uint8_t signerhash[DIGEST_SIZE]={0,};
     int ret = FAIL;
-
+    my_memset(signerhash, 0, DIGEST_SIZE);
     ret = is_nativelibrary_tampered();
 
     if(ret != SUCCESS){
+        __android_log_print(ANDROID_LOG_VERBOSE, APPNAME, "Native Library is Tampered");
        goto cleanup;
     }
 
     z = zip_open(path,0, &ret);
-    if(z==NULL ||  ret != 0)
+    if(z==NULL ||  ret != 0){
+        __android_log_print(ANDROID_LOG_VERBOSE, APPNAME, "ZIP OPEN FAILED");
+
         goto cleanup;
+    }
 
     ret = zip_stat(z, CERT, 0, &zipstat);
-    if( ret != 0)
+    if( ret != 0){
+        __android_log_print(ANDROID_LOG_VERBOSE, APPNAME, "ZIP STAT FAILED");
         goto cleanup;
+    }
 
     rsacert = malloc( zipstat.size * sizeof(uint8_t) );
 
     zf = zip_fopen(z, CERT, 0);
-    if(zf == NULL)
+    if(zf == NULL){
+        __android_log_print(ANDROID_LOG_VERBOSE, APPNAME, "ZIP FILE NOT FOUND");
         goto cleanup;
+    }
 
     readsize = zip_fread(zf,rsacert,zipstat.size);
-    if(readsize != 0 && readsize != zipstat.size)
+    if(readsize != 0 && readsize != zipstat.size){
+        __android_log_print(ANDROID_LOG_VERBOSE, APPNAME, "ZIP INTERNAL ERROR");
         goto cleanup;
-
+    }
+    __android_log_print(ANDROID_LOG_VERBOSE, APPNAME, "CERT.RSA..Size:%d",readsize);
     filesize = (size_t)readsize;
     const mbedtls_md_info_t *md = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
 
-    ret = mbedtls_md(md,rsacert,filesize, signerhash);
-    if(ret != 0)
+    ret = mbedtls_md(md,rsacert,784, signerhash);
+    if(ret != 0){
+        __android_log_print(ANDROID_LOG_VERBOSE, APPNAME, "HASH INTERNAL ERROR");
         goto cleanup;
-
+    }
+    print_bytearray(signerhash, DIGEST_SIZE);
     if(0 == my_memcmp(signerhash, APK_SIGNER_HASH, DIGEST_SIZE)) {
         __android_log_print(ANDROID_LOG_VERBOSE, APPNAME, "APK Signing Certificate hash matches");
-        ret = FAIL;
+        ret = SUCCESS;
     }else {
         __android_log_print(ANDROID_LOG_VERBOSE, APPNAME, "APK Signing Certificate does not match");
-        ret = SUCCESS;
+        ret = FAIL;
     }
 
     cleanup:

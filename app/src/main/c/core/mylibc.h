@@ -4,6 +4,7 @@
  * These functions are copied from glibc, android libc, apple libc open source code.
  * This is to avoid easy bypass through libc functions
  */
+#define memset(x,y,z) my_memset((x),(y),(z))
 
 __attribute__((always_inline))
 static inline size_t
